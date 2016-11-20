@@ -50,6 +50,7 @@
           <simplelist type="vert" columns="1">
 
            <member><link linkend="beast.ref.http__ext_list">ext_list</link></member>
+           <member><link linkend="beast.ref.http__opt_token_list">opt_token_list</link></member>
            <member><link linkend="beast.ref.http__param_list">param_list</link></member>
            <member><link linkend="beast.ref.http__token_list">token_list</link></member>
           </simplelist>
