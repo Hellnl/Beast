@@ -175,7 +175,7 @@ protected:
         on_header(error_code& ec)
         {
             r_.emplace(m_);
-            //r_->init(ec);
+            r_->init(ec);
         }
 
         void
@@ -225,7 +225,7 @@ protected:
         on_header(error_code& ec)
         {
             r_.emplace(m_);
-            //r_->init(ec);
+            r_->init(ec);
         }
 
         void
@@ -236,11 +236,33 @@ protected:
         }
     };
 
-    struct dummy_fields
+    struct Fields_exemplar
     {
         void
         insert(boost::string_ref const&,
             boost::string_ref const&);
+    };
+
+    struct Body_exemplar
+    {
+        using value_type = int;
+
+        struct reader
+        {
+            message<true,
+                Body_exemplar,
+                Fields_exemplar>& m;
+            
+            template<bool isRequest,
+                class Body, class Fields>
+            reader(message<
+                isRequest, Body, Fields>&);
+
+            void init(error_code&);
+
+            void write(void const*,
+                std::size_t, error_code&);
+        };
     };
 };
 

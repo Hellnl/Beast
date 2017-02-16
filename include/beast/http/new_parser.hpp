@@ -27,7 +27,7 @@ class new_parser
     using impl_type = typename std::conditional<
         isRequest, req_impl_base, res_impl_base>::type;
 
-    std::unique_ptr<impl_type> impl_;
+    std::unique_ptr<impl_type> p_;
 
 public:
     /// `true` if this parser parses requests, `false` for responses.
@@ -66,7 +66,7 @@ private:
     impl_type&
     impl()
     {
-        return *impl_;
+        return *p_.get();
     }
 
     template<class Fields>
@@ -74,7 +74,8 @@ private:
     construct(header<true, Fields>& h)
     {
         split(true);
-        impl_.reset(new req_h_impl<Fields>{h});
+        using type = req_h_impl<Fields>;
+        p_.reset(new type{h});
     }
 
     template<class Fields>
@@ -82,7 +83,8 @@ private:
     construct(header<false, Fields>& h)
     {
         split(true);
-        impl_.reset(new res_h_impl<Fields>{h});
+        using type = res_h_impl<Fields>;
+        p_.reset(new type{h});
     }
 
     template<class Body, class Fields>
@@ -90,7 +92,8 @@ private:
     construct(message<true, Body, Fields>& m)
     {
         split(false);
-        impl_.reset(new req_impl<Body, Fields>{m});
+        using type = req_impl<Body, Fields>;
+        p_.reset(new type{m});
     }
 
     template<class Body, class Fields>
@@ -98,7 +101,8 @@ private:
     construct(message<false, Body, Fields>& m)
     {
         split(false);
-        impl_.reset(new res_impl<Body, Fields>{m});
+        using type = res_impl<Body, Fields>;
+        p_.reset(new type{m});
     }
 
     void

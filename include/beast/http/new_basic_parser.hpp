@@ -87,14 +87,11 @@ public:
             std::forward<An>(an)...);
     }
 
-    /// Set the skip body option.
+    /// Set the body maximum size option
     void
-    set_option(skip_body const& opt)
+    set_option(body_max_size const& o)
     {
-        if(opt.value)
-            f_ |= flagSkipBody;
-        else
-            f_ &= ~flagSkipBody;
+        // VFALCO TODO
     }
 
     /// Set the header maximum size option
@@ -104,11 +101,14 @@ public:
         // VFALCO TODO
     }
 
-    /// Set the body maximum size option
+    /// Set the skip body option.
     void
-    set_option(body_max_size const& o)
+    set_option(skip_body const& opt)
     {
-        // VFALCO TODO
+        if(opt.value)
+            f_ |= flagSkipBody;
+        else
+            f_ &= ~flagSkipBody;
     }
 
     /** Returns `true` if the parser requires additional input.
