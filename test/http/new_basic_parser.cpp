@@ -18,25 +18,82 @@ class new_basic_parser_test : public beast::unit_test::suite
 {
 public:
     template<bool isRequest>
+    struct cb_checker
+        : public new_basic_parser<
+            isRequest, cb_checker<isRequest>>
+    {
+        bool on_start_ = false;
+        bool on_field_ = false;
+        bool on_header_ = false;
+        bool on_chunk_ = false;
+        bool on_body_ = false;
+        bool on_done_ = false;
+
+    private:
+        friend class new_basic_parser<
+            isRequest, cb_checker<isRequest>>;
+
+        void
+        on_request(boost::string_ref const& method,
+            boost::string_ref const& path,
+                int version, error_code&)
+        {
+            on_start_ = true;
+        }
+
+        void
+        on_response(int status,
+            boost::string_ref const& reason,
+                int version, error_code&)
+        {
+            on_start_ = true;
+        }
+
+        void
+        on_field(boost::string_ref const& name,
+            boost::string_ref const& value,
+                error_code&)
+        {
+            on_field_ = true;
+        }
+
+        void
+        on_header(error_code& ec)
+        {
+            on_header_ = true;
+        }
+
+        void
+        on_chunk(std::uint64_t length,
+            boost::string_ref const& ext,
+                error_code&)
+        {
+            on_chunk_ = true;
+        }
+
+        void
+        on_body(boost::string_ref const& data,
+            error_code& ec)
+        {
+            on_body_ = true;
+        }
+
+        void
+        on_done(error_code& ec)
+        {
+            on_done_ = true;
+        }
+    };
+
+    template<bool isRequest>
     class test_parser :
         public new_basic_parser<isRequest,
             test_parser<isRequest>>
     {
-        int status_;
-        int version_;
-
     public:
-        int
-        version() const
-        {
-            return version_;
-        }
-
-        int
-        status() const
-        {
-            return status_;
-        }
+        int status;
+        int version;
+        std::string body;
 
     private:
         friend new_basic_parser<isRequest,
@@ -45,18 +102,18 @@ public:
         void
         on_request(boost::string_ref const& method,
             boost::string_ref const& path,
-                int version, error_code&)
+                int version0, error_code&)
         {
-            version_ = version;
+            version = version0;
         }
 
         void
-        on_response(int status,
+        on_response(int status0,
             boost::string_ref const& reason,
-                int version, error_code& ec)
+                int version0, error_code& ec)
         {
-            status_ = status;
-            version_ = version;
+            status = status0;
+            version = version0;
         }
 
         void
@@ -79,8 +136,14 @@ public:
         }
 
         void
-        on_body(boost::string_ref const& data,
+        on_body(boost::string_ref const& in,
             error_code& ec)
+        {
+            body.append(in.data(), in.size());
+        }
+
+        void
+        on_done(error_code&)
         {
         }
     };
@@ -101,7 +164,7 @@ public:
         void
         operator()(Parser const& p) const
         {
-            s_.BEAST_EXPECT(p.version() == version_);
+            s_.BEAST_EXPECT(p.version == version_);
         }
     };
 
@@ -121,7 +184,7 @@ public:
         void
         operator()(Parser const& p) const
         {
-            s_.BEAST_EXPECT(p.status() == status_);
+            s_.BEAST_EXPECT(p.status == status_);
         }
     };
 
@@ -164,6 +227,36 @@ public:
             s_.BEAST_EXPECT(p.keep_alive() == v_);
         }
     };
+
+    class expect_body
+    {
+        suite& s_;
+        std::string const& body_;
+
+    public:
+        expect_body(expect_body&&) = default;
+
+        expect_body(suite& s, std::string const& v)
+            : s_(s)
+            , body_(v)
+        {
+        }
+
+        template<class Parser>
+        void
+        operator()(Parser const& p) const
+        {
+            s_.BEAST_EXPECT(p.body == body_);
+        }
+    };
+
+    template<std::size_t N>
+    static
+    boost::asio::const_buffers_1
+    buf(char const (&s)[N])
+    {
+        return {s, N-1};
+    }
 
     template<bool isRequest, class Pred>
     void
@@ -209,6 +302,8 @@ public:
         error_code ec;
         p.write(buffer(
             s.data(), s.size()), ec);
+        if(! ec && ev)
+            p.write_eof(ec);
         BEAST_EXPECTS(ec == ev, ec.message());
     }
 
@@ -236,7 +331,7 @@ public:
                 BEAST_EXPECT(p.need_more());
                 p.write(buffer_cat(b1, b2), ec);
                 BEAST_EXPECTS(! ec, ec.message());
-                BEAST_EXPECT(p.complete());
+                BEAST_EXPECT(p.is_done());
             }
         }
         {
@@ -260,6 +355,53 @@ public:
                 BEAST_EXPECTS(! ec, ec.message());
                 p.write_eof(ec);
             }
+        }
+    }
+
+    // Check that all callbacks are invoked
+    void
+    testCallbacks()
+    {
+        using boost::asio::buffer;
+        {
+            cb_checker<true> p;
+            error_code ec;
+            std::string const s =
+                "GET / HTTP/1.1\r\n"
+                "User-Agent: test\r\n"
+                "Content-Length: 1\r\n"
+                "\r\n"
+                "*";
+            p.write(buffer(s), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.need_more());
+            BEAST_EXPECT(p.is_done());
+            BEAST_EXPECT(p.on_start_);
+            BEAST_EXPECT(p.on_field_);
+            BEAST_EXPECT(p.on_header_);
+            BEAST_EXPECT(p.on_body_);
+            BEAST_EXPECT(! p.on_chunk_);
+            BEAST_EXPECT(p.on_done_);
+        }
+        {
+            cb_checker<false> p;
+            error_code ec;
+            std::string const s =
+                "HTTP/1.1 200 OK\r\n"
+                "Server: test\r\n"
+                "Content-Length: 1\r\n"
+                "\r\n"
+                "*";
+            p.write(buffer(s), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.need_more());
+            BEAST_EXPECT(p.is_done());
+            BEAST_EXPECT(p.on_start_);
+            BEAST_EXPECT(p.on_field_);
+            BEAST_EXPECT(p.on_header_);
+            BEAST_EXPECT(p.on_body_);
+            BEAST_EXPECT(! p.on_chunk_);
+            BEAST_EXPECT(p.on_done_);
         }
     }
 
@@ -634,24 +776,166 @@ public:
         good<true>(m("Upgrades: 2\r\n"),                    expect_flags{*this, 0});
         good<true>(m("Upsample: 4x\r\n"),                   expect_flags{*this, 0});
 
-#if 0
         good<true>(
             "GET / HTTP/1.1\r\n"
             "Connection: upgrade\r\n"
             "Upgrade: WebSocket\r\n"
             "\r\n",
-            [&](fail_parser<true> const& p)
+            [&](test_parser<true> const& p)
             {
                 BEAST_EXPECT(p.upgrade());
             });
-#endif
     }
 
+    void testBody()
+    {
+        using boost::asio::buffer;
+        good<true>(
+            "GET / HTTP/1.1\r\n"
+            "Content-Length: 1\r\n"
+            "\r\n"
+            "1",
+            expect_body(*this, "1"));
+
+        good<false>(
+            "HTTP/1.0 200 OK\r\n"
+            "\r\n"
+            "hello",
+            expect_body(*this, "hello"));
+
+        // write the body in 3 pieces
+        {
+            error_code ec;
+            test_parser<true> p;
+            p.write(buffer_cat(
+                buf("GET / HTTP/1.1\r\n"
+                    "Content-Length: 10\r\n"
+                    "\r\n"),
+                buf("12"),
+                buf("345"),
+                buf("67890")), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(p.is_done());
+            BEAST_EXPECT(! p.needs_eof());
+        }
+
+        // request without Content-Length or
+        // Transfer-Encoding: chunked has no body.
+        {
+            error_code ec;
+            test_parser<true> p;
+            p.write(buf(
+                "GET / HTTP/1.0\r\n"
+                "\r\n"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.needs_eof());
+            BEAST_EXPECT(p.is_done());
+        }
+        {
+            error_code ec;
+            test_parser<true> p;
+            p.write(buf(
+                "GET / HTTP/1.1\r\n"
+                "\r\n"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.needs_eof());
+            BEAST_EXPECT(p.is_done());
+        }
+
+        // response without Content-Length or
+        // Transfer-Encoding: chunked requires eof.
+        {
+            error_code ec;
+            test_parser<false> p;
+            p.write(buf(
+                "HTTP/1.0 200 OK\r\n"
+                "\r\n"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.is_done());
+            BEAST_EXPECT(p.needs_eof());
+            p.write(buf(
+                "hello"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.is_done());
+            BEAST_EXPECT(p.needs_eof());
+            p.write_eof(ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(p.is_done());
+        }
+
+        // 304 "Not Modified" response does not require eof
+        {
+            error_code ec;
+            test_parser<false> p;
+            p.write(buf(
+                "HTTP/1.0 304 Not Modified\r\n"
+                "\r\n"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.needs_eof());
+            BEAST_EXPECT(p.is_done());
+        }
+
+        // Chunked response does not require eof
+        {
+            error_code ec;
+            test_parser<false> p;
+            p.write(buf(
+                "HTTP/1.1 200 OK\r\n"
+                "Transfer-Encoding: chunked\r\n"
+                "\r\n"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.needs_eof());
+            BEAST_EXPECT(! p.is_done());
+            p.write(buf(
+                "0\r\n\r\n"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(! p.needs_eof());
+            BEAST_EXPECT(p.is_done());
+        }
+
+        // restart: 1.0 assumes Connection: close
+        {
+            error_code ec;
+            test_parser<true> p;
+            p.write(buf(
+                "GET / HTTP/1.0\r\n"
+                "\r\n"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(p.is_done());
+        }
+
+        // restart: 1.1 assumes Connection: keep-alive
+        {
+            error_code ec;
+            test_parser<true> p;
+            p.write(buf(
+                "GET / HTTP/1.1\r\n"
+                "\r\n"
+                ), ec);
+            BEAST_EXPECTS(! ec, ec.message());
+            BEAST_EXPECT(p.is_done());
+        }
+
+        bad<true>(
+            "GET / HTTP/1.1\r\n"
+            "Content-Length: 1\r\n"
+            "\r\n",
+            error::partial_message);
+    }
 
     void
     run() override
     {
         testFlatten();
+        testCallbacks();
         testRequestLine();
         testStatusLine();
         testFields();
@@ -659,6 +943,7 @@ public:
         testContentLengthField();
         testTransferEncodingField();
         testUpgradeField();
+        testBody();
     }
 };
 

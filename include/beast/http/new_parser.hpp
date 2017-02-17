@@ -148,6 +148,12 @@ private:
     {
         impl().on_body(data, ec);
     }
+
+    void
+    on_done(error_code& ec)
+    {
+        impl().on_done(ec);
+    }
 };
 
 template<bool isRequest>

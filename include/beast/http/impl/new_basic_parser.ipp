@@ -35,10 +35,10 @@ need_more() const
 {
     if(! (f_ & flagHaveHeader))
         return true;
-    if(! (f_ & flagNeedBody))
+    if(! (f_ & flagHasBody))
         return false;
     if(f_ & (
-            flagPauseBody  | flagSkipBody |
+            flagPauseBody  | flatOmitBody |
             flagSplitParse | flagDone))
         return false;
     return true;
@@ -84,7 +84,7 @@ new_basic_parser<isRequest, Derived>::
 write(boost::asio::const_buffers_1 const& buffer,
     error_code& ec)
 {
-    BOOST_ASSERT(! complete());
+    BOOST_ASSERT(! is_done());
     using boost::asio::buffer_cast;
     using boost::asio::buffer_size;
     boost::string_ref s0{
@@ -105,7 +105,7 @@ write(boost::asio::const_buffers_1 const& buffer,
     }
     if(is_chunked())
     {
-        while(! complete() && ! s.empty())
+        while(! is_done() && ! s.empty())
         {
             if(len_ == 0)
             {
@@ -128,7 +128,7 @@ write(boost::asio::const_buffers_1 const& buffer,
     }
     else
     {
-        while(! complete() && ! s.empty())
+        while(! is_done() && ! s.empty())
         {
             auto n = parse_body(
                 s.data(), s.size(), ec);
@@ -161,7 +161,9 @@ write_eof(error_code& ec)
     }
     else
     {
-        f_ |= flagDone;
+        maybe_done(ec);
+        if(ec)
+            return;
     }
 }
 
@@ -188,7 +190,11 @@ write_body(Reader& r,
     {
         len_ -= len;
         if(len_ == 0)
-            f_ |= flagDone;
+        {
+            maybe_done(ec);
+            if(ec)
+                return;
+        }
     }
     else if(f_ & flagChunked)
     {
@@ -232,6 +238,17 @@ maybe_flatten(
     buffer_copy(
         buffer(buf_, buf_len_), buffers);
     return {buf_, buf_len_};
+}
+
+template<bool isRequest, class Derived>
+void
+new_basic_parser<isRequest, Derived>::
+maybe_done(error_code& ec)
+{
+    impl().on_done(ec);
+    if(ec)
+        return;
+    f_ |= flagDone;
 }
 
 template<bool isRequest, class Derived>
@@ -593,6 +610,13 @@ void
 new_basic_parser<isRequest, Derived>::
 do_header(int, std::true_type)
 {
+    // RFC 7230 section 3.3
+    // https://tools.ietf.org/html/rfc7230#section-3.3
+
+    if(f_ & (flagContentLength | flagChunked))
+        f_ |= flagHasBody;
+    else
+        f_ |= flagDone;
 }
 
 template<bool isRequest, class Derived>
@@ -602,19 +626,21 @@ do_header(int status, std::false_type)
 {
     // RFC 7230 section 3.3
     // https://tools.ietf.org/html/rfc7230#section-3.3
-    if( status  / 100 == 1 ||   // 1xx e.g. Continue
+
+    if( (f_ & flatOmitBody) ||  // e.g. response to a HEAD request
+        status  / 100 == 1 ||   // 1xx e.g. Continue
         status == 204 ||        // No Content
-        status == 304 ||        // Not Modified
-        (f_ & flagSkipBody))    // e.g. response to a HEAD request
+        status == 304)          // Not Modified
+    {
+        f_ |= flagDone ;
         return;
+    }
 
-    if(f_ & (flagChunked | flagContentLength))
-        return;
+    if(! (f_ & (flagContentLength | flagChunked)))
+        f_ |= flagNeedEOF;
 
-    f_ |= flagNeedEOF;
+    f_ |= flagHasBody;
 }
-
-//    return ! (f_ & (flagChunked + flagContentLength));
 
 template<bool isRequest, class Derived>
 std::size_t
@@ -638,7 +664,11 @@ parse_body(char const* p,
         return 0;
     len_ -= n;
     if(len_ == 0 && ! is_chunked())
-        f_ |= flagDone;
+    {
+        maybe_done(ec);
+        if(ec)
+            return 0;
+    }
     return n;
 }
 
@@ -769,7 +799,10 @@ parse_chunk(char const* p,
     if(ec)
         return 0;
     BOOST_ASSERT(p == term.end());
-    f_ |= flagDone;
+
+    maybe_done(ec);
+    if(ec)
+        return 0;
     return p - first;
 }
 

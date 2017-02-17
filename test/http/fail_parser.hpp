@@ -9,6 +9,7 @@
 #define BEAST_HTTP_TEST_FAIL_PARSER_HPP
 
 #include <beast/http/basic_parser_v1.hpp>
+#include <beast/http/new_basic_parser.hpp>
 #include <beast/test/fail_counter.hpp>
 
 namespace beast {
@@ -111,6 +112,98 @@ public:
     void on_complete(error_code& ec)
     {
         fc_.fail(ec);
+    }
+};
+
+template<bool isRequest>
+class new_fail_parser
+    : public new_basic_parser<
+        isRequest, new_fail_parser<isRequest>>
+{
+    test::fail_counter& fc_;
+    std::uint64_t content_length_ = no_content_length;
+    body_what body_rv_ = body_what::normal;
+
+public:
+    std::string body;
+
+    template<class... Args>
+    explicit
+    new_fail_parser(test::fail_counter& fc,
+            Args&&... args)
+        : fc_(fc)
+    {
+    }
+
+    void
+    on_body_rv(body_what rv)
+    {
+        body_rv_ = rv;
+    }
+
+    // valid on successful parse
+    std::uint64_t
+    content_length() const
+    {
+        auto const v =
+            new_basic_parser<
+        isRequest, new_fail_parser<
+            isRequest>>::content_length();
+        return v ? *v : no_content_length;
+    }
+
+    void
+    on_request(boost::string_ref const&,
+        boost::string_ref const&,
+            int, error_code& ec)
+    {
+        fc_.fail(ec);
+    }
+
+    void
+    on_response(
+        int, boost::string_ref const&,
+            int, error_code& ec)
+    {
+        fc_.fail(ec);
+    }
+
+    void
+    on_field(boost::string_ref const&,
+        boost::string_ref const&,
+            error_code& ec)
+    {
+        fc_.fail(ec);
+    }
+
+    void
+    on_header(error_code& ec)
+    {
+        fc_.fail(ec);
+    }
+
+    void
+    on_chunk(std::uint64_t,
+        boost::string_ref const&,
+            error_code& ec)
+    {
+        fc_.fail(ec);
+    }
+
+    void
+    on_body(boost::string_ref const& s,
+        error_code& ec)
+    {
+        if(fc_.fail(ec))
+            return;
+        body.append(s.data(), s.size());
+    }
+
+    void
+    on_done(error_code& ec)
+    {
+        if(fc_.fail(ec))
+            return;
     }
 };
 

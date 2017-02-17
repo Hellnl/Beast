@@ -26,11 +26,20 @@ template<bool isRequest, class Derived>
 class new_basic_parser
     : private detail::new_basic_parser_base
 {
-    static unsigned constexpr flagGotSome               = 1<<  0;
+    // Consider this message as having no body
+    static unsigned constexpr flatOmitBody              = 1<<  0;
+
+    // Parser will pause after reading the header
     static unsigned constexpr flagPauseBody             = 1<<  1;
-    static unsigned constexpr flagSkipBody              = 1<<  2;
-    static unsigned constexpr flagSplitParse            = 1<<  3;
-    static unsigned constexpr flagNeedBody              = 1<<  4;
+
+    // Parser will pause after reading the header
+    static unsigned constexpr flagSplitParse            = 1<<  2;
+
+    // The parser has read at least one byte
+    static unsigned constexpr flagGotSome               = 1<<  3;
+
+    // Message semantics indicate a body is expected
+    static unsigned constexpr flagHasBody               = 1<<  4;
 
     static unsigned constexpr flagDone                  = 1<<  5;
     static unsigned constexpr flagHaveHeader            = 1<<  6;
@@ -106,9 +115,9 @@ public:
     set_option(skip_body const& opt)
     {
         if(opt.value)
-            f_ |= flagSkipBody;
+            f_ |= flatOmitBody;
         else
-            f_ &= ~flagSkipBody;
+            f_ &= ~flatOmitBody;
     }
 
     /** Returns `true` if the parser requires additional input.
@@ -125,6 +134,23 @@ public:
     */
     bool
     need_more() const;
+
+    /** Returns `true` if the parser is finished with the message.
+
+        The message is finished when the header is parsed and
+        one of the following is true:
+
+        @li The @ref skip_body option is set
+
+        @li The semantics of the message indicate there is no body.
+
+        @li The complete, expected body was parsed.
+    */
+    bool
+    is_done() const
+    {
+        return (f_ & flagDone) != 0;
+    }
 
     unsigned
     flags() const
@@ -226,13 +252,6 @@ public:
     */
     bool
     keep_alive() const;
-
-    /// Returns `true` if a complete message has been parsed.
-    bool
-    complete() const
-    {
-        return (f_ & flagDone) != 0;
-    }
 
     template<class ConstBufferSequence>
     std::size_t
@@ -340,6 +359,9 @@ private:
     boost::string_ref
     maybe_flatten(
         ConstBufferSequence const& buffers);
+
+    void
+    maybe_done(error_code& ec);
 
     void
     parse_startline(char const*& it,

@@ -8,6 +8,8 @@
 // Test that header file is self-contained.
 #include <beast/http/new_parser.hpp>
 
+#include "fail_parser.hpp"
+
 #include <beast/unit_test/suite.hpp>
 #include <beast/test/string_istream.hpp>
 #include <beast/test/string_ostream.hpp>
@@ -26,7 +28,7 @@
 A. Caller wants to skip body YES/NO (e.g. HEAD response)
     p.set_option(body_skip{true});
     p.set_option(body_skip{false}); // default
-    f_ |= flagSkipBody
+    f_ |= flatOmitBody
     
 B. Caller wants to pause the body YES/NO (implement Expect: 100-continue)
     p.set_option(body_pause{true});
@@ -93,7 +95,7 @@ bool basic_parser::have_header() const
 bool basic_parser::need_body() const
 {
     BOOST_ASSERT(have_header());
-    return ((f_ & (flagNeedBody | flagSkipBody)) == flagNeedBody);
+    return ((f_ & (flagNeedBody | flatOmitBody)) == flagNeedBody);
 }
 
 /// Returns `true` if all parsing is complete

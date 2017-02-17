@@ -44,6 +44,12 @@ protected:
             error_code& ec)
         {
         }
+        
+        virtual
+        void
+        on_done(error_code& ec)
+        {
+        }
     };
 
     struct req_impl_base : impl_base
@@ -172,7 +178,7 @@ protected:
         }
 
         void
-        on_header(error_code& ec)
+        on_header(error_code& ec) override
         {
             r_.emplace(m_);
             r_->init(ec);
@@ -183,6 +189,11 @@ protected:
             error_code& ec) override
         {
             r_->write(s.data(), s.size(), ec);
+        }
+
+        void
+        on_done(error_code&) override
+        {
         }
     };
 
@@ -222,7 +233,7 @@ protected:
         }
 
         void
-        on_header(error_code& ec)
+        on_header(error_code& ec) override
         {
             r_.emplace(m_);
             r_->init(ec);
@@ -233,6 +244,11 @@ protected:
             error_code& ec) override
         {
             r_->write(s.data(), s.size(), ec);
+        }
+
+        void
+        on_done(error_code&) override
+        {
         }
     };
 
